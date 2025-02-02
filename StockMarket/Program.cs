@@ -1,4 +1,7 @@
-﻿namespace StockMarket;
+﻿using System.Runtime.ConstrainedExecution;
+using System.Threading;
+
+namespace StockMarket;
 
 static class MarketData
 {
@@ -21,136 +24,132 @@ static class MarketData
 
 internal class TSI
 {
-	public decimal FromA { get; set; }
-	public decimal ToA { get; set; }
+	public int TripleCount { get; set; }
 }
 
 internal class Program
 {
+	static int currentCompleted = 0;
+
+	static object syncRoot = new object();
+	static (decimal A, decimal B, decimal C, decimal perc99, decimal perc95, decimal perc50, decimal rangeFrom, decimal rangeTo) currentMaximum = (0, 0, 0, 0, 0, 0, 0, 0);
+
+	static void ThreadWorker(object obj)
+{
+		// range 30+ yrs
+		// vezmu si A/B/C (A >= 40, C <= 40, B <= 40 - pro pripad zefektivneni)
+		// vezmu vsechny 30+range
+		// simulace pro bruteforce procento vyberu
+		// pro ten jeden range najdu takovy procento, kde v_1 == v_n
+		// vsechny tyhle procenta hodit na hromadu, najit 99% perc (sort podle velikosti, najit prvek [n//100])
+		// pro ten range vypsat vsechny ty procenta a tu reprezentativni hodnotu (procenta[n//100])
+
+		TSI tsi = (TSI)obj;
+
+		int yearSpan = 30;
+
+		(decimal From, decimal To) initWithdrawPercRange = (0, 32); // used for interval halving algorithm, initial percentages
+
+		decimal epsilon = 0.01m; // how much can initial and ending perc differ to still accept it
+
+		IList<(decimal a, decimal b, decimal c)> myTriples = TripleGenerator.GetMyTriples(tsi.TripleCount);
+		int tripleRepeatCount = 1000;
+
+		for (int tripleIndex = 0; tripleIndex < myTriples.Count; tripleIndex++)
+		{
+			(decimal aPerc, decimal bPerc, decimal cPerc) = myTriples[tripleIndex];
+
+			if (aPerc == 0 && bPerc == 0 && cPerc == 0) continue;
+
+			List<decimal> correctPercentages = new List<decimal>();
+
+			sPortfolio portfolio = new sPortfolio(aPerc, bPerc, cPerc, 100000);
+
+			for (int tripleRepeatIndex = 0; tripleRepeatIndex < tripleRepeatCount; ++tripleRepeatIndex)
+			{
+				IList<int> years = YearListGenerator.GetYears(yearSpan);
+
+				decimal minInitialWithdrawPerc = initWithdrawPercRange.From;
+				decimal maxInitialWithdrawPerc = initWithdrawPercRange.To;
+
+				while (true)
+				{
+					decimal currInitialWithdrawPerc = (minInitialWithdrawPerc + maxInitialWithdrawPerc) / 2;
+
+					var result = portfolio.GetSimulation(years, currInitialWithdrawPerc);
+
+					decimal lastWithdrawPerc;
+					try
+					{
+						lastWithdrawPerc = result[result.Count - 1].WithdrawalValue / result[result.Count - 1].PortValue * 100;
+					}
+					catch (DivideByZeroException e)
+					{
+						Console.WriteLine("!!!!!!!!!!!!!!!!!!! ERROR !!!!!!!!!!!!!!!!!!!!!!!");
+						Console.WriteLine($"(aPerc: {aPerc}, bPerc: {bPerc}, cPerc: {cPerc}, )");
+						return;
+					}
+
+					if (decimal.Abs(lastWithdrawPerc - currInitialWithdrawPerc) <= epsilon)
+					{
+						correctPercentages.Add(currInitialWithdrawPerc);
+						break;
+					}
+
+					if (lastWithdrawPerc > currInitialWithdrawPerc || lastWithdrawPerc < 0) { maxInitialWithdrawPerc = currInitialWithdrawPerc; continue; }
+					else { minInitialWithdrawPerc = currInitialWithdrawPerc; continue; }
+				}
+			}
+
+			correctPercentages.Sort();
+
+			decimal fiftiethPerc = correctPercentages[correctPercentages.Count / 2];
+
+			lock (syncRoot)
+			{
+				Console.Write(
+						$"[{((double)currentCompleted * 100 / TripleGenerator.ALL_POSSIBLE_TRIPLE_COUNT).ToString("0.0000")}%] For percentages: ({aPerc.ToString("00.00")}, {bPerc.ToString("00.00")}, {cPerc.ToString("00.00")}): range ({correctPercentages[0].ToString("00.00000000")}, {correctPercentages[correctPercentages.Count - 1].ToString("00.00000000")}), 99th percentile: {correctPercentages[correctPercentages.Count / 100].ToString("00.00000000")}, 95th percentile: {correctPercentages[correctPercentages.Count / 20].ToString("00.00000000")}, 50th percentile: {fiftiethPerc.ToString("00.00000000")}");
+
+				if (fiftiethPerc > currentMaximum.perc50)
+				{
+					currentMaximum = (aPerc, bPerc, cPerc, correctPercentages[correctPercentages.Count / 100], correctPercentages[correctPercentages.Count / 20], fiftiethPerc, correctPercentages[0], correctPercentages[correctPercentages.Count - 1]);
+					Console.WriteLine("           NEW MAXIMUM");
+				}
+				else
+				{
+					Console.WriteLine();
+				}
+			}
+
+
+			currentCompleted++;
+		}
+
+		Console.WriteLine($"THREAD FINISHED");
+	}
+
+	static void TestMain()
+	{
+		ThreadWorker(new TSI { TripleCount = TripleGenerator.ALL_POSSIBLE_TRIPLE_COUNT });
+	}
+
 	static void Main(string[] args)
 	{
-		Thread[] threads = new Thread[20];
-		decimal aShare = 60m / threads.Length; // (40 <= A <= 100)
-
-		object syncRoot = new object();
-		(decimal A, decimal B, decimal C, decimal value, decimal rangeFrom, decimal rangeTo) currentMaximum = (0, 0, 0, 0, 0, 0);
+		Thread[] threads = new Thread[32];
 
 		for (int i = 0; i < threads.Length; ++i)
 		{
-#if DEBUG
-			Console.WriteLine($"FromA = {(i * aShare) + 40m}, ToA = {((i + 1) * aShare) - (i < threads.Length - 1 ? 1 : 0) + 40m}");
-			continue;
-#endif
+			threads[i] = new Thread((obj) => ThreadWorker(obj));
 
-			threads[i] = new Thread((obj) =>
-			{
-				// range 30+ yrs
-				// vezmu si A/B/C (A >= 40, C <= 40, B <= 40 - pro pripad zefektivneni)
-				// vezmu vsechny 30+range
-				// simulace pro bruteforce procento vyberu
-				// pro ten jeden range najdu takovy procento, kde v_1 == v_n
-				// vsechny tyhle procenta hodit na hromadu, najit 99% perc (sort podle velikosti, najit prvek [n//100])
-				// pro ten range vypsat vsechny ty procenta a tu reprezentativni hodnotu (procenta[n//100])
-
-				TSI tsi = (TSI)obj;
-
-				(decimal From, decimal To) aRange = (tsi.FromA, tsi.ToA);
-				(decimal From, decimal To) bRange = (0, 100);
-				(decimal From, decimal To) cRange = (0, 100);
-
-				(int From, int To) yearspanRange = (30, -1); // use -1 in 'To' to not restrict maximal yearspan
-
-				(decimal From, decimal To) initWithdrawPercRange = (0, 32); // used for interval halving algorithm, initial percentages
-
-				decimal epsilon = 0.01m; // how much can initial and ending perc differ to still accept it
-
-				for (decimal aPerc = aRange.From; aPerc <= aRange.To; aPerc++)
-				{
-					if (100m - aPerc < bRange.From) continue;
-
-					for (decimal bPerc = bRange.From; bPerc <= (100m - aPerc); bPerc++)
-					{
-						if (aPerc + bPerc > 100m) break;
-
-						decimal cPerc = 100 - aPerc - bPerc;
-
-						// pro jistotu, jsem kokot
-						if (aPerc < 0m || aPerc > 100m || bPerc < 0m || bPerc > 100m || cPerc < 0m || cPerc > 100m)
-							throw new InvalidDataException("nekde jsi to posral petre");
-
-						if (cPerc < cRange.From || cPerc > cRange.To) continue;
-
-						List<decimal> correctPercentages = new List<decimal>();
-
-						sPortfolio portfolio = new sPortfolio(aPerc, bPerc, cPerc, 100000);
-
-						for (int yearspan = yearspanRange.From; /* NO CHECK, CARE FOR INFINITE CYCLE */ ; yearspan++)
-						{
-							if ((yearspanRange.To != -1 && yearspan > yearspanRange.To) || yearspan > (MarketData.DATA_MAX_YEAR - MarketData.DATA_MIN_YEAR))
-								break;
-
-							for (int yearFrom = MarketData.DATA_MIN_YEAR; yearFrom < MarketData.DATA_MAX_YEAR; yearFrom++)
-							{
-								int yearTo = yearFrom + yearspan;
-								if (yearTo > MarketData.DATA_MAX_YEAR) { break; }
-
-								decimal minInitialWithdrawPerc = initWithdrawPercRange.From;
-								decimal maxInitialWithdrawPerc = initWithdrawPercRange.To;
-
-								while (true)
-								{
-									decimal currInitialWithdrawPerc = (minInitialWithdrawPerc + maxInitialWithdrawPerc) / 2;
-
-									var result = portfolio.GetSimulation(yearFrom, yearTo, currInitialWithdrawPerc);
-
-									decimal lastWithdrawPerc = result[result.Count - 1].WithdrawalValue / result[result.Count - 1].PortValue * 100;
-
-									if (decimal.Abs(lastWithdrawPerc - currInitialWithdrawPerc) <= epsilon)
-									{
-										correctPercentages.Add(currInitialWithdrawPerc);
-										break;
-									}
-
-									if (lastWithdrawPerc > currInitialWithdrawPerc || lastWithdrawPerc < 0) { maxInitialWithdrawPerc = currInitialWithdrawPerc; continue; }
-									else { minInitialWithdrawPerc = currInitialWithdrawPerc; continue; }
-								}
-							}
-						}
-
-						correctPercentages.Sort();
-
-						decimal ninetyninethPerc = correctPercentages[correctPercentages.Count / 100];
-
-						lock (syncRoot)
-						{
-							if (ninetyninethPerc > currentMaximum.value)
-							{
-								currentMaximum = (aPerc, bPerc, cPerc, ninetyninethPerc, correctPercentages[0], correctPercentages[correctPercentages.Count - 1]);
-								Console.WriteLine(
-									$"\n\nFor percentages: ({aPerc}, {bPerc}, {cPerc}): range ({correctPercentages[0]}, {correctPercentages[correctPercentages.Count - 1]}), 99th percentile: {ninetyninethPerc}, 95th percentile: {correctPercentages[correctPercentages.Count / 20]}    NEW MAXIMUM\n\n");
-							}
-							else
-							{
-								Console.WriteLine(
-									$"For percentages: ({aPerc}, {bPerc}, {cPerc}): range ({correctPercentages[0]}, {correctPercentages[correctPercentages.Count - 1]}), 99th percentile: {ninetyninethPerc}, 95th percentile: {correctPercentages[correctPercentages.Count / 20]}");
-							}
-						}
-					}
-				}
-
-				Console.WriteLine($"THREAD ({aRange.From}, {aRange.To}) FINISHED");
-
-			});
-
-			threads[i].Start(new TSI { FromA = (i * aShare) + 40m, ToA = ((i + 1) * aShare) - (i < threads.Length - 1 ? 1 : 0) + 40m });
+			threads[i].Start(new TSI { TripleCount = (TripleGenerator.ALL_POSSIBLE_TRIPLE_COUNT / threads.Length) + 1 });
 		}
-#if !DEBUG
+
 		for (int i = 0; i < threads.Length; ++i)
 		{
 			threads[i].Join();
 		}
 
 		Console.WriteLine("ALL THREADS FINISHED");
-#endif
+		Console.WriteLine($"Maximum: (({currentMaximum.A}, {currentMaximum.B}, {currentMaximum.C}), 99th perc:{currentMaximum.perc99}, 95th perc:{currentMaximum.perc95}, ranging from: {currentMaximum.rangeFrom} to {currentMaximum.rangeTo})");
 	}
 }

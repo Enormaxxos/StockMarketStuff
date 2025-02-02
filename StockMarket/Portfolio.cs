@@ -1,4 +1,6 @@
-﻿namespace StockMarket;
+﻿using System.Security.Cryptography;
+
+namespace StockMarket;
 
 public struct sPortfolio
 {
@@ -16,38 +18,47 @@ public struct sPortfolio
 		InitialMoney = initialMoney;
 	}
 
-	public IList<YearValueBag> GetSimulation(int fromYear, int toYear, decimal initialWithdrawPerc)
+	public IList<YearValueBag> GetSimulation(IList<int> years, decimal initialWithdrawPerc)
 	{
-		var firstYearData = MarketData.GetDataFromYear(fromYear);
+		var firstYearData = MarketData.GetDataFromYear(years[0]);
 
 		var result = new List<YearValueBag>();
 
 		var firstYearBag = new YearValueBag()
 		{
-			Year = fromYear,
+			Year = years[0],
 			PortValue = InitialMoney * (PercA * (1 + firstYearData.SP500) + PercB * (1 + firstYearData.SimulatedBond) + PercC * (1 + firstYearData.TBill))
 		};
 		firstYearBag.WithdrawalValue = firstYearBag.PortValue * (initialWithdrawPerc / 100m);
+		firstYearBag.PortValue -= firstYearBag.WithdrawalValue;
 
 		result.Add(firstYearBag);
 
-		while (true)
+		for (int i = 1; i < years.Count; ++i)
 		{
 			var prevYear = result[result.Count - 1];
-			var nextYearData = MarketData.GetDataFromYear(prevYear.Year + 1);
+			var nextYearData = MarketData.GetDataFromYear(years[i]);
 			var newYear = new YearValueBag()
 			{
-				Year = prevYear.Year + 1,
+				Year = nextYearData.Year,
 				WithdrawalValue = prevYear.WithdrawalValue * (1 + nextYearData.Inflation),
 			};
 			newYear.PortValue = prevYear.PortValue * (PercA * (1 + nextYearData.SP500) + PercB * (1 + nextYearData.SimulatedBond) + PercC * (1 + nextYearData.TBill)) - newYear.WithdrawalValue;
 
 			result.Add(newYear);
-
-			if (newYear.Year == toYear) 
-				break;
 		}
 
 		return result;
+	}
+
+	public IList<YearValueBag> GetSimulation(int fromYear, int toYear, decimal initialWithdrawPerc)
+	{
+		int[] years = new int[toYear - fromYear + 1];
+		for (int i = 0; i < years.Length; ++i)
+		{
+			years[i] = i + fromYear;
+		}
+
+		return GetSimulation(years, initialWithdrawPerc);
 	}
 }
