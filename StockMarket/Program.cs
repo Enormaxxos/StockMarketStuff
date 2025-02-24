@@ -25,6 +25,7 @@ static class MarketData
 internal class TSI
 {
 	public int TripleCount { get; set; }
+	public IOutputter Output { get; set; }
 }
 
 internal class Program
@@ -33,6 +34,9 @@ internal class Program
 
 	static object syncRoot = new object();
 	static (decimal A, decimal B, decimal C, decimal perc99, decimal perc95, decimal perc50, decimal rangeFrom, decimal rangeTo) currentMaximum = (0, 0, 0, 0, 0, 0, 0, 0);
+
+	//static IOutputter output = new FileOutputter("out.txt");
+	static IOutputter output = new ConsoleOutputter();
 
 	static void ThreadWorker(object obj)
 {
@@ -85,8 +89,8 @@ internal class Program
 					}
 					catch (DivideByZeroException e)
 					{
-						Console.WriteLine("!!!!!!!!!!!!!!!!!!! ERROR !!!!!!!!!!!!!!!!!!!!!!!");
-						Console.WriteLine($"(aPerc: {aPerc}, bPerc: {bPerc}, cPerc: {cPerc}, )");
+						output.WriteLine("!!!!!!!!!!!!!!!!!!! ERROR !!!!!!!!!!!!!!!!!!!!!!!");
+						output.WriteLine($"(aPerc: {aPerc}, bPerc: {bPerc}, cPerc: {cPerc}, )");
 						return;
 					}
 
@@ -107,17 +111,20 @@ internal class Program
 
 			lock (syncRoot)
 			{
-				Console.Write(
+				output.Write(
 						$"[{((double)currentCompleted * 100 / TripleGenerator.ALL_POSSIBLE_TRIPLE_COUNT).ToString("0.0000")}%] For percentages: ({aPerc.ToString("00.00")}, {bPerc.ToString("00.00")}, {cPerc.ToString("00.00")}): range ({correctPercentages[0].ToString("00.00000000")}, {correctPercentages[correctPercentages.Count - 1].ToString("00.00000000")}), 99th percentile: {correctPercentages[correctPercentages.Count / 100].ToString("00.00000000")}, 95th percentile: {correctPercentages[correctPercentages.Count / 20].ToString("00.00000000")}, 50th percentile: {fiftiethPerc.ToString("00.00000000")}");
+
+				// TODO: nevypisovat dvakrat
+				Console.WriteLine($"[{((double)currentCompleted * 100 / TripleGenerator.ALL_POSSIBLE_TRIPLE_COUNT).ToString("0.0000")}%]");
 
 				if (fiftiethPerc > currentMaximum.perc50)
 				{
 					currentMaximum = (aPerc, bPerc, cPerc, correctPercentages[correctPercentages.Count / 100], correctPercentages[correctPercentages.Count / 20], fiftiethPerc, correctPercentages[0], correctPercentages[correctPercentages.Count - 1]);
-					Console.WriteLine("           NEW MAXIMUM");
+					output.WriteLine("           NEW MAXIMUM");
 				}
 				else
 				{
-					Console.WriteLine();
+					output.WriteLine("");
 				}
 			}
 
@@ -126,11 +133,6 @@ internal class Program
 		}
 
 		Console.WriteLine($"THREAD FINISHED");
-	}
-
-	static void TestMain()
-	{
-		ThreadWorker(new TSI { TripleCount = TripleGenerator.ALL_POSSIBLE_TRIPLE_COUNT });
 	}
 
 	static void Main(string[] args)
