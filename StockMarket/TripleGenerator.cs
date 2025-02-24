@@ -25,13 +25,10 @@ public static class TripleGenerator
 				decimal c = 100m - a - b;
 
 				if (c > C_RANGE.To) continue;
-				if (c < C_RANGE.From) goto skip_rest_of_b;
+				if (c < C_RANGE.From) break;
 
 				POSSIBLE_TRIPLES.Add((a, b, c));
 			}
-
-	skip_rest_of_b:;
-
 		}
 
 		_syncRoot = new object();
