@@ -15,6 +15,8 @@ public static class YearListGenerator
 	{
 		if (repeatable) return GetYearsRepeatable(count);
 
+		if (count > MarketData.YEAR_COUNT) throw new ArgumentOutOfRangeException("Tolik let nemam bruh");
+
 		IList<int> result = new List<int>();
 		IList<int> years = new List<int>();
 		for (int i = MarketData.DATA_MIN_YEAR; i < MarketData.DATA_MAX_YEAR + 1; i++)

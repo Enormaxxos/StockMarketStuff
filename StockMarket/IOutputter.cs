@@ -1,6 +1,6 @@
 ﻿namespace StockMarket
 {
-	public interface IOutputter
+	public interface IOutputter : IDisposable
 	{
 		public void Write(string str);
 		public void WriteLine(string str);
@@ -17,6 +17,11 @@
 		{
 			Console.WriteLine(str);
 		}
+
+		public void Dispose()
+		{
+
+		}
 	}
 
 	public class FileOutputter : IOutputter
@@ -25,6 +30,11 @@
 		public FileOutputter(string filename)
 		{
 			file = new StreamWriter(filename, false);
+		}
+
+		public void Dispose()
+		{
+			file.Dispose();
 		}
 
 		public void Write(string str)
